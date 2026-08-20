@@ -147,10 +147,12 @@
             font-size: 28px !important;
         }
 
-        /* Swap inputs with static display text tags during photo generation so text never clips/disappears */
+        /* Swap inputs with static display text tags & hide action buttons during photo generation */
         .force-landscape input, 
         .force-landscape textarea, 
-        .force-landscape select {
+        .force-landscape select,
+        .force-landscape .actions,
+        .force-landscape .actions-ignore {
             display: none !important;
         }
 
@@ -830,20 +832,94 @@
             for (let i = 1; i <= 7; i++) {
                 resetSingleDay(i);
             }
-            document.getElementById('weeklyReviewNotes').value = '';
-            saveActiveDraft();
         }
     }
 
-    function getSavedReports() {
-        return JSON.parse(localStorage.getItem('dolores_reports') || '{}');
+    // --- SNAPSHOT UPDATER FOR PHOTO CAPTURE ---
+    function updateSnapshots() {
+        document.getElementById('snap-eventDate').textContent = document.getElementById('eventDate').value;
+        document.getElementById('snap-eventName').textContent = document.getElementById('eventName').value;
+        document.getElementById('snap-goodFights').textContent = document.getElementById('goodFights').value;
+        document.getElementById('snap-plasada').textContent = formatNumber(Number(document.getElementById('plasada').value) || 0);
+        document.getElementById('snap-prize').textContent = formatNumber(Number(document.getElementById('prize').value) || 0);
+        document.getElementById('snap-salaryExpDisplay').textContent = document.getElementById('salaryExpDisplay').value;
+        document.getElementById('snap-checkedBy').textContent = document.getElementById('checkedBy').value;
+
+        const expInputs = document.querySelectorAll('.expense-item');
+        const expSnaps = document.querySelectorAll('.exp-snap');
+        expInputs.forEach((inp, idx) => {
+            if (expSnaps[idx]) expSnaps[idx].textContent = formatNumber(Number(inp.value) || 0);
+        });
+
+        document.getElementById('snap-reportTitle').textContent = document.getElementById('reportTitle').value;
+        document.getElementById('snap-weeklyReviewNotes').textContent = document.getElementById('weeklyReviewNotes').value;
+
+        const rDates = document.querySelectorAll('.r-date');
+        const rDateSnaps = document.querySelectorAll('.r-date-snap');
+        rDates.forEach((inp, idx) => { if (rDateSnaps[idx]) rDateSnaps[idx].textContent = inp.value; });
+
+        const rDescs = document.querySelectorAll('.r-desc');
+        const rDescSnaps = document.querySelectorAll('.r-desc-snap');
+        rDescs.forEach((inp, idx) => { if (rDescSnaps[idx]) rDescSnaps[idx].textContent = inp.value; });
+
+        const rShares = document.querySelectorAll('.report-share');
+        const rShareSnaps = document.querySelectorAll('.r-share-snap');
+        rShares.forEach((inp, idx) => { if (rShareSnaps[idx]) rShareSnaps[idx].textContent = formatNumber(Number(inp.value) || 0); });
+    }
+
+    // --- SAVE AS PHOTO (HTML2CANVAS) ---
+    function saveAsPhoto(elementId, filename) {
+        updateSnapshots();
+        const element = document.getElementById(elementId);
+        element.classList.add('force-landscape');
+
+        html2canvas(element, {
+            scale: 2,
+            useCORS: true,
+            logging: false
+        }).then(canvas => {
+            element.classList.remove('force-landscape');
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }).catch(err => {
+            element.classList.remove('force-landscape');
+            alert('Error generating image: ' + err.message);
+        });
+    }
+
+    // --- WEEKLY REPORT HISTORY ---
+    function getHistory() {
+        try {
+            return JSON.parse(localStorage.getItem('dolores_weekly_history')) || [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveHistory(history) {
+        localStorage.setItem('dolores_weekly_history', JSON.stringify(history));
+        updateHistorySelect();
+    }
+
+    function updateHistorySelect() {
+        const select = document.getElementById('reportHistorySelect');
+        select.innerHTML = '<option value="current">-- Active Weekly Working Draft --</option>';
+        const history = getHistory();
+        history.forEach((item, index) => {
+            const opt = document.createElement('option');
+            opt.value = index;
+            opt.textContent = `${item.title || 'Untitled Batch'} (${item.dateSaved || 'No Date'})`;
+            select.appendChild(opt);
+        });
     }
 
     function saveReportToHistory() {
-        const titleInput = document.getElementById('reportTitle');
-        let title = titleInput.value.trim();
+        const title = document.getElementById('reportTitle').value.trim();
         if (!title) {
-            title = "Weekly Report " + new Date().toLocaleDateString();
+            alert('Please enter a Report Title before saving!');
+            return;
         }
 
         const dates = Array.from(document.querySelectorAll('.r-date')).map(i => i.value);
@@ -851,56 +927,47 @@
         const shares = Array.from(document.querySelectorAll('.report-share')).map(i => i.value);
         const notes = document.getElementById('weeklyReviewNotes').value;
 
-        const reportData = { title, dates, descs, shares, notes };
+        const history = getHistory();
+        const batchRecord = {
+            id: Date.now(),
+            title: title,
+            dateSaved: new Date().toLocaleDateString(),
+            weeklyReviewNotes: notes,
+            dates: dates,
+            descs: descs,
+            shares: shares
+        };
 
-        const reports = getSavedReports();
-        const id = 'rep_' + Date.now();
-        reports[id] = reportData;
-
-        localStorage.setItem('dolores_reports', JSON.stringify(reports));
-        
-        updateHistoryDropdown();
-        alert("Weekly report saved to history!");
-    }
-
-    function updateHistoryDropdown() {
-        const select = document.getElementById('reportHistorySelect');
-        select.innerHTML = '<option value="current">-- Active Weekly Working Draft --</option>';
-        const reports = getSavedReports();
-        Object.keys(reports).forEach(id => {
-            const rep = reports[id];
-            const opt = document.createElement('option');
-            opt.value = id;
-            opt.textContent = rep.title || id;
-            select.appendChild(opt);
-        });
+        history.push(batchRecord);
+        saveHistory(history);
+        alert('Weekly Report Batch saved to history successfully!');
     }
 
     function loadSelectedReport() {
         const select = document.getElementById('reportHistorySelect');
-        const selectedId = select.value;
+        const val = select.value;
 
-        if (selectedId === 'current') {
+        if (val === 'current') {
             loadActiveDraft();
             calculateReportTotal();
             return;
         }
 
-        const reports = getSavedReports();
-        const report = reports[selectedId];
-        if (!report) return;
+        const history = getHistory();
+        const record = history[val];
+        if (!record) return;
 
-        document.getElementById('reportTitle').value = report.title || '';
-        document.getElementById('weeklyReviewNotes').value = report.notes || '';
+        document.getElementById('reportTitle').value = record.title || '';
+        document.getElementById('weeklyReviewNotes').value = record.weeklyReviewNotes || '';
 
         const dateInputs = document.querySelectorAll('.r-date');
         const descInputs = document.querySelectorAll('.r-desc');
         const shareInputs = document.querySelectorAll('.report-share');
 
         for (let i = 0; i < 7; i++) {
-            dateInputs[i].value = (report.dates && report.dates[i]) || '';
-            descInputs[i].value = (report.descs && report.descs[i]) || '';
-            shareInputs[i].value = (report.shares && report.shares[i]) || '';
+            dateInputs[i].value = record.dates ? record.dates[i] || '' : '';
+            descInputs[i].value = record.descs ? record.descs[i] || '' : '';
+            shareInputs[i].value = record.shares ? record.shares[i] || '' : '';
         }
 
         calculateReportTotal();
@@ -908,112 +975,34 @@
 
     function deleteSelectedReportWithPasscode() {
         const select = document.getElementById('reportHistorySelect');
-        const selectedId = select.value;
+        const val = select.value;
 
-        if (selectedId === 'current') {
-            alert("Cannot delete the active working draft from history. Use 'Reset All Days' to clear it.");
+        if (val === 'current') {
+            alert('Cannot delete active working draft from history here. Use "Reset All Days" instead.');
             return;
         }
 
         if (verifyPasscode()) {
-            const reports = getSavedReports();
-            delete reports[selectedId];
-            localStorage.setItem('dolores_reports', JSON.stringify(reports));
-            updateHistoryDropdown();
-            select.value = 'current';
+            const history = getHistory();
+            history.splice(Number(val), 1);
+            saveHistory(history);
+            alert('Saved Weekly Batch deleted successfully.');
             loadActiveDraft();
             calculateReportTotal();
-            alert("Weekly report deleted successfully!");
         }
     }
 
-    // --- SNAPSHOT & IMAGE GENERATION ---
-    function populateSnapshotText(container) {
-        const pairs = [
-            ['eventDate', 'snap-eventDate'],
-            ['eventName', 'snap-eventName'],
-            ['goodFights', 'snap-goodFights'],
-            ['plasada', 'snap-plasada'],
-            ['prize', 'snap-prize'],
-            ['salaryExpDisplay', 'snap-salaryExpDisplay'],
-            ['checkedBy', 'snap-checkedBy'],
-            ['reportTitle', 'snap-reportTitle'],
-            ['weeklyReviewNotes', 'snap-weeklyReviewNotes']
-        ];
-
-        pairs.forEach(([inpId, snapId]) => {
-            const inp = document.getElementById(inpId);
-            const snap = document.getElementById(snapId);
-            if (inp && snap) {
-                snap.textContent = inp.value || (inpId === 'plasada' || inpId === 'prize' || inpId === 'salaryExpDisplay' ? '0' : '');
-            }
-        });
-
-        // Expenses
-        const expInputs = container.querySelectorAll('.expense-item');
-        expInputs.forEach(inp => {
-            const snap = inp.nextElementSibling;
-            if (snap && snap.classList.contains('exp-snap')) {
-                snap.textContent = inp.value ? formatNumber(inp.value) : '0';
-            }
-        });
-
-        // Report table rows
-        const rows = container.querySelectorAll('#reportTableBody tr');
-        rows.forEach(row => {
-            const dateInp = row.querySelector('.r-date');
-            const dateSnap = row.querySelector('.r-date-snap');
-            if (dateInp && dateSnap) dateSnap.textContent = dateInp.value || '';
-
-            const descInp = row.querySelector('.r-desc');
-            const descSnap = row.querySelector('.r-desc-snap');
-            if (descInp && descSnap) descSnap.textContent = descInp.value || '';
-
-            const shareInp = row.querySelector('.report-share');
-            const shareSnap = row.querySelector('.r-share-snap');
-            if (shareInp && shareSnap) shareSnap.textContent = shareInp.value ? formatNumber(shareInp.value) : '0';
-        });
-    }
-
-    async function saveAsPhoto(elementId, fileName) {
-        const element = document.getElementById(elementId);
-        if (!element) return;
-
-        populateSnapshotText(element);
-        element.classList.add('force-landscape');
-
-        try {
-            const canvas = await html2canvas(element, {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                windowWidth: 1000
-            });
-
-            const link = document.createElement('a');
-            link.download = fileName;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        } catch (err) {
-            console.error("Error generating image:", err);
-            alert("Failed to export image. Please try again.");
-        } finally {
-            element.classList.remove('force-landscape');
-        }
-    }
-
-    // --- STORAGE BACKUP & CLEAR ---
+    // --- STORAGE BACKUP / IMPORT / EXPORT ---
     function exportDataFile() {
         const data = {
-            dolores_active_draft: localStorage.getItem('dolores_active_draft'),
-            dolores_reports: localStorage.getItem('dolores_reports')
+            activeDraft: JSON.parse(localStorage.getItem('dolores_active_draft') || '{}'),
+            history: getHistory()
         };
-        const jsonStr = JSON.stringify(data, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Dolores_Arena_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+        a.download = `dolores_arena_backup_${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -1026,17 +1015,16 @@
         reader.onload = function(e) {
             try {
                 const data = JSON.parse(e.target.result);
-                if (data.dolores_active_draft) {
-                    localStorage.setItem('dolores_active_draft', data.dolores_active_draft);
-                }
-                if (data.dolores_reports) {
-                    localStorage.setItem('dolores_reports', data.dolores_reports);
-                }
-                alert("Backup restored successfully!");
-                initApp();
+                if (data.activeDraft) localStorage.setItem('dolores_active_draft', JSON.stringify(data.activeDraft));
+                if (data.history) localStorage.setItem('dolores_weekly_history', JSON.stringify(data.history));
+                
+                loadActiveDraft();
+                calculate();
+                calculateReportTotal();
+                updateHistorySelect();
+                alert('Backup imported successfully!');
             } catch (err) {
-                alert("Invalid JSON backup file.");
-                console.error("Import error:", err);
+                alert('Invalid JSON backup file.');
             }
         };
         reader.readAsText(file);
@@ -1045,27 +1033,25 @@
     function clearAllStorageWithPasscode() {
         if (verifyPasscode()) {
             localStorage.removeItem('dolores_active_draft');
-            localStorage.removeItem('dolores_reports');
+            localStorage.removeItem('dolores_weekly_history');
             resetForm();
             for (let i = 1; i <= 7; i++) {
                 resetSingleDay(i);
             }
-            document.getElementById('weeklyReviewNotes').value = '';
             document.getElementById('reportTitle').value = '';
-            updateHistoryDropdown();
-            alert("All local data has been cleared.");
+            document.getElementById('weeklyReviewNotes').value = '';
+            updateHistorySelect();
+            alert('All stored data cleared successfully.');
         }
     }
 
     // --- INITIALIZATION ---
-    function initApp() {
+    window.addEventListener('DOMContentLoaded', () => {
         loadActiveDraft();
         calculate();
         calculateReportTotal();
-        updateHistoryDropdown();
-    }
-
-    window.addEventListener('DOMContentLoaded', initApp);
+        updateHistorySelect();
+    });
 </script>
 </body>
 </html>
